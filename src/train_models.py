@@ -2,8 +2,11 @@
 
 기본 비교 모델: ResNet-18, EfficientNet-B0, MobileNetV3-Small
 
-Validation에 Training의 클래스가 모두 없으면(현재 기쁨 누락), 공정한 7개 클래스
-비교를 위해 Training에서 클래스별 10%를 고정 seed로 분리한다.
+Validation에 Training의 클래스가 모두 없으면 공정한 7개 클래스 비교를 위해
+Training에서 클래스별 10%를 고정 seed로 분리한다.
+
+장시간 학습을 위해 epoch마다 last.pt/history.json을 원자적으로 저장하고,
+검증 macro-F1이 가장 높은 모델은 best.pt로 별도 보존한다.
 """
 
 from __future__ import annotations
@@ -12,10 +15,13 @@ import argparse
 import csv
 import json
 import logging
+import platform
 import random
+import socket
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -49,6 +55,7 @@ class Metrics:
     accuracy: float
     macro_f1: float
     per_class: dict[str, dict[str, float | int]]
+    confusion_matrix: list[list[int]]
 
 
 class EmotionDataset(Dataset[tuple[torch.Tensor, int]]):
@@ -88,13 +95,23 @@ def parse_args() -> argparse.Namespace:
         default=project_root / "models",
     )
     parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=project_root / "results" / "experiments",
+        help="GitHub로 공유할 작은 JSON/CSV/PNG 결과 경로",
+    )
+    parser.add_argument(
+        "--run-name",
+        help="PC/실험 구분 이름. 생략하면 PC이름과 시각으로 자동 생성",
+    )
+    parser.add_argument(
         "--models",
         nargs="+",
         choices=MODEL_NAMES,
         default=list(MODEL_NAMES),
     )
     parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--label-smoothing", type=float, default=0.1)
@@ -113,6 +130,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="ImageNet 사전학습 가중치를 내려받지 않고 처음부터 학습",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="같은 run-name/model의 last.pt에서 중단 학습 재개",
+    )
+    parser.add_argument(
+        "--no-visualize",
+        action="store_true",
+        help="학습 종료 후 발표용 PNG 자동 생성을 건너뜀",
+    )
     args = parser.parse_args()
 
     if args.epochs <= 0 or args.batch_size <= 0 or args.workers < 0:
@@ -121,6 +148,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("--val-ratio는 0과 1 사이여야 합니다.")
     if args.patience < 1:
         parser.error("--patience는 1 이상이어야 합니다.")
+    if args.run_name and (
+        Path(args.run_name).name != args.run_name
+        or args.run_name in {".", ".."}
+    ):
+        parser.error("--run-name에는 폴더 구분자를 사용할 수 없습니다.")
+    if args.resume and not args.run_name:
+        parser.error("--resume에는 기존 --run-name을 함께 지정해야 합니다.")
     return args
 
 
@@ -131,6 +165,36 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
+
+
+def atomic_write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def atomic_torch_save(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    torch.save(value, temporary)
+    temporary.replace(path)
+
+
+def runtime_info(device: torch.device) -> dict[str, str | int | None]:
+    gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else None
+    return {
+        "computer_name": socket.gethostname(),
+        "python": platform.python_version(),
+        "torch": torch.__version__,
+        "torchvision": __import__("torchvision").__version__,
+        "cuda_runtime": torch.version.cuda,
+        "device": str(device),
+        "gpu_name": gpu_name,
+    }
 
 
 def label_from_filename(path: Path) -> str | None:
@@ -373,6 +437,7 @@ def run_epoch(
         accuracy=accuracy,
         macro_f1=macro_f1,
         per_class=class_report,
+        confusion_matrix=confusion.tolist(),
     )
 
 
@@ -383,6 +448,7 @@ def train_one_model(
     args: argparse.Namespace,
     device: torch.device,
     validation_source: str,
+    environment: dict[str, str | int | None],
 ) -> dict:
     LOGGER.info("%s 학습 시작", model_name)
     model = build_model(
@@ -396,15 +462,54 @@ def train_one_model(
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
     model_output = args.output_dir / model_name
+    report_output = args.report_dir / model_name
     model_output.mkdir(parents=True, exist_ok=True)
+    report_output.mkdir(parents=True, exist_ok=True)
     best_path = model_output / "best.pt"
+    last_path = model_output / "last.pt"
+    history_path = model_output / "history.json"
+    report_history_path = report_output / "history.json"
+    summary_path = model_output / "run_summary.json"
+    report_summary_path = report_output / "run_summary.json"
     history: list[dict] = []
     best_f1 = -1.0
     best_epoch = 0
+    best_validation: dict | None = None
     stale_epochs = 0
+    start_epoch = 1
+    previous_elapsed_seconds = 0.0
+    started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     started = time.time()
 
-    for epoch in range(1, args.epochs + 1):
+    if args.resume:
+        if not last_path.is_file():
+            raise FileNotFoundError(f"재개할 체크포인트가 없습니다: {last_path}")
+        checkpoint = torch.load(last_path, map_location=device, weights_only=False)
+        if checkpoint.get("model_name") != model_name:
+            raise RuntimeError(f"체크포인트 모델이 다릅니다: {last_path}")
+        if int(checkpoint.get("target_epochs", -1)) != args.epochs:
+            raise RuntimeError(
+                "재개할 때 --epochs는 최초 실행과 같아야 합니다: "
+                f"checkpoint={checkpoint.get('target_epochs')}, current={args.epochs}"
+            )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if checkpoint.get("scaler_state_dict"):
+            scaler.load_state_dict(checkpoint["scaler_state_dict"])
+        history = checkpoint.get("history", [])
+        best_f1 = float(checkpoint.get("best_macro_f1", -1.0))
+        best_epoch = int(checkpoint.get("best_epoch", 0))
+        best_validation = checkpoint.get("best_validation")
+        stale_epochs = int(checkpoint.get("stale_epochs", 0))
+        previous_elapsed_seconds = float(checkpoint.get("elapsed_seconds", 0.0))
+        started_at = checkpoint.get("started_at", started_at)
+        start_epoch = int(checkpoint["epoch"]) + 1
+        LOGGER.info("%s 학습 재개: epoch %d부터", model_name, start_epoch)
+
+    completed_epoch = start_epoch - 1
+    stopped_early = False
+    for epoch in range(start_epoch, args.epochs + 1):
         train_metrics = run_epoch(
             model, train_loader, criterion, device, optimizer, scaler
         )
@@ -420,6 +525,7 @@ def train_one_model(
             "validation": asdict(val_metrics),
         }
         history.append(row)
+        completed_epoch = epoch
         LOGGER.info(
             "%s epoch %d/%d | train loss %.4f acc %.4f | "
             "val loss %.4f acc %.4f macro-F1 %.4f",
@@ -433,16 +539,20 @@ def train_one_model(
             val_metrics.macro_f1,
         )
 
+        should_stop = False
         if val_metrics.macro_f1 > best_f1:
             best_f1 = val_metrics.macro_f1
             best_epoch = epoch
+            best_validation = asdict(val_metrics)
             stale_epochs = 0
-            torch.save(
+            atomic_torch_save(
+                best_path,
                 {
                     "model_name": model_name,
                     "model_state_dict": model.state_dict(),
-                    "class_names": CLASS_NAMES,
+                    "class_names": list(CLASS_NAMES),
                     "image_size": 224,
+                    "channels": 1,
                     "normalization": {
                         "mean": IMAGENET_MEAN,
                         "std": IMAGENET_STD,
@@ -450,26 +560,85 @@ def train_one_model(
                     "validation_source": validation_source,
                     "best_epoch": best_epoch,
                     "best_macro_f1": best_f1,
+                    "best_accuracy": val_metrics.accuracy,
+                    "validation_metrics": best_validation,
+                    "environment": environment,
+                    "run_name": args.run_name,
                 },
-                best_path,
             )
         else:
             stale_epochs += 1
             if stale_epochs >= args.patience:
                 LOGGER.info("%s 조기 종료: %d epoch", model_name, epoch)
-                break
+                should_stop = True
+                stopped_early = True
 
-    history_path = model_output / "history.json"
-    history_path.write_text(
-        json.dumps(history, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+        elapsed_seconds = previous_elapsed_seconds + (time.time() - started)
+        atomic_write_json(history_path, history)
+        atomic_write_json(report_history_path, history)
+        atomic_torch_save(
+            last_path,
+            {
+                "model_name": model_name,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "scaler_state_dict": scaler.state_dict(),
+                "epoch": epoch,
+                "target_epochs": args.epochs,
+                "history": history,
+                "best_epoch": best_epoch,
+                "best_macro_f1": best_f1,
+                "best_validation": best_validation,
+                "stale_epochs": stale_epochs,
+                "elapsed_seconds": elapsed_seconds,
+                "started_at": started_at,
+                "validation_source": validation_source,
+                "run_name": args.run_name,
+                "environment": environment,
+            },
+        )
+        if should_stop:
+            break
+
+    if best_validation is None:
+        raise RuntimeError(f"{model_name}에서 유효한 최고 성능을 저장하지 못했습니다.")
+
+    elapsed_seconds = previous_elapsed_seconds + (time.time() - started)
+    summary = {
+        "run_name": args.run_name,
+        "model": model_name,
+        "target_epochs": args.epochs,
+        "completed_epochs": completed_epoch,
+        "stopped_early": stopped_early,
+        "patience": args.patience,
+        "best_epoch": best_epoch,
+        "best_accuracy": best_validation["accuracy"],
+        "best_macro_f1": best_f1,
+        "best_validation": best_validation,
+        "parameters": sum(parameter.numel() for parameter in model.parameters()),
+        "elapsed_minutes": elapsed_seconds / 60,
+        "validation_source": validation_source,
+        "train_samples": len(train_loader.dataset),
+        "validation_samples": len(val_loader.dataset),
+        "started_at": started_at,
+        "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "environment": environment,
+        "checkpoint": str(best_path),
+        "last_checkpoint": str(last_path),
+        "history": str(history_path),
+    }
+    atomic_write_json(summary_path, summary)
+    atomic_write_json(report_summary_path, summary)
     return {
+        "run_name": args.run_name,
         "model": model_name,
         "best_epoch": best_epoch,
+        "completed_epochs": completed_epoch,
+        "best_accuracy": best_validation["accuracy"],
         "best_macro_f1": best_f1,
-        "parameters": sum(parameter.numel() for parameter in model.parameters()),
-        "elapsed_minutes": (time.time() - started) / 60,
+        "parameters": summary["parameters"],
+        "elapsed_minutes": summary["elapsed_minutes"],
         "checkpoint": str(best_path),
         "history": str(history_path),
     }
@@ -482,8 +651,13 @@ def main() -> None:
     )
     args = parse_args()
     args.data_dir = args.data_dir.resolve()
-    args.output_dir = args.output_dir.resolve()
+    args.run_name = args.run_name or (
+        f"{socket.gethostname()}_{datetime.now():%Y%m%d_%H%M%S}"
+    )
+    args.output_dir = args.output_dir.resolve() / args.run_name
+    args.report_dir = args.report_dir.resolve() / args.run_name
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    args.report_dir.mkdir(parents=True, exist_ok=True)
     seed_everything(args.seed)
 
     train_samples, val_samples, validation_source = choose_train_and_validation(
@@ -503,6 +677,8 @@ def main() -> None:
     persistent_workers = args.workers > 0
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     LOGGER.info("사용 장치: %s", device)
+    environment = runtime_info(device)
+    LOGGER.info("실험 이름: %s", args.run_name)
     if device.type != "cuda":
         LOGGER.warning("GPU를 찾지 못했습니다. 전체 모델 비교에는 시간이 오래 걸립니다.")
 
@@ -531,16 +707,19 @@ def main() -> None:
             args,
             device,
             validation_source,
+            environment,
         )
         for model_name in args.models
     ]
     comparison.sort(key=lambda row: row["best_macro_f1"], reverse=True)
 
     comparison_path = args.output_dir / "model_comparison.csv"
-    with comparison_path.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=comparison[0].keys())
-        writer.writeheader()
-        writer.writerows(comparison)
+    report_comparison_path = args.report_dir / "model_comparison.csv"
+    for path in (comparison_path, report_comparison_path):
+        with path.open("w", encoding="utf-8-sig", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=comparison[0].keys())
+            writer.writeheader()
+            writer.writerows(comparison)
 
     LOGGER.info(
         "비교 완료. 최고 모델: %s (macro-F1 %.4f)",
@@ -548,6 +727,21 @@ def main() -> None:
         comparison[0]["best_macro_f1"],
     )
     LOGGER.info("결과: %s", comparison_path)
+
+    if not args.no_visualize:
+        try:
+            from visualize_results import generate_visualizations
+
+            generated = generate_visualizations(
+                [args.report_dir], args.report_dir / "figures"
+            )
+            LOGGER.info("발표용 시각화 %d개 생성: %s", len(generated), args.report_dir / "figures")
+        except Exception:
+            # 그림 생성 오류가 성공한 모델 체크포인트를 무효화하지 않게 한다.
+            LOGGER.exception(
+                "모델 학습은 완료됐지만 시각화 생성에 실패했습니다. "
+                "visualize_results.py를 별도로 실행하세요."
+            )
 
 
 if __name__ == "__main__":

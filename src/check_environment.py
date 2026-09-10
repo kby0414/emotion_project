@@ -11,6 +11,7 @@ EXPECTED_PYTHON = (3, 12, 10)
 EXPECTED_TORCH = "2.13.0+cu126"
 EXPECTED_TORCHVISION = "0.28.0+cu126"
 EXPECTED_PILLOW = "12.3.0"
+EXPECTED_MATPLOTLIB = "3.11.1"
 EXPECTED_CUDA = "12.6"
 
 
@@ -33,6 +34,7 @@ def main() -> None:
     args = parse_args()
 
     try:
+        import matplotlib
         import PIL
         import torch
         import torchvision
@@ -42,6 +44,7 @@ def main() -> None:
     actual = {
         "python": platform.python_version(),
         "pillow": PIL.__version__,
+        "matplotlib": matplotlib.__version__,
         "torch": torch.__version__,
         "torchvision": torchvision.__version__,
         "torch_cuda_runtime": torch.version.cuda or "NONE",
@@ -57,6 +60,7 @@ def main() -> None:
         expected = {
             "python": ".".join(map(str, EXPECTED_PYTHON)),
             "pillow": EXPECTED_PILLOW,
+            "matplotlib": EXPECTED_MATPLOTLIB,
             "torch": EXPECTED_TORCH,
             "torchvision": EXPECTED_TORCHVISION,
             "torch_cuda_runtime": EXPECTED_CUDA,

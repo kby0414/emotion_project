@@ -46,6 +46,74 @@ results/preprocessing_eda_report.md
 
 기본 비교 모델은 ResNet-18, EfficientNet-B0, MobileNetV3-Small이며 CUDA가 인식되면 자동으로 GPU를 사용한다.
 
+### 장시간 학습 권장 명령
+
+1 epoch 시험이 끝났다면 최대 epoch를 50으로 두고 macro-F1이 7회 연속 개선되지 않을 때 조기 종료하는 방식을 권장한다.
+
+```powershell
+.\.venv\Scripts\python.exe .\src\train_models.py `
+  --models resnet18 `
+  --epochs 50 `
+  --patience 7 `
+  --batch-size 32 `
+  --run-name pc_main_resnet18_e50
+```
+
+현재 PC의 1 epoch 실측 시간이 약 40.8분이므로 조기 종료가 없다면 30 epoch는 약 20시간, 50 epoch는 약 34시간이 걸릴 수 있다. 검증 macro-F1이 가장 높은 모델은 `best.pt`, 매 epoch의 재개용 상태는 `last.pt`에 저장된다.
+
+중단 후에는 최초 명령과 같은 옵션에 `--resume`만 추가한다.
+
+```powershell
+.\.venv\Scripts\python.exe .\src\train_models.py `
+  --models resnet18 `
+  --epochs 50 `
+  --patience 7 `
+  --batch-size 32 `
+  --run-name pc_main_resnet18_e50 `
+  --resume
+```
+
+저장 구조는 다음과 같다.
+
+```text
+models/<run-name>/<model>/
+  best.pt             최고 macro-F1 추론용 모델
+  last.pt             중단 재개용 모델·optimizer 상태
+  history.json        epoch별 지표
+  run_summary.json    최고 성능·GPU·환경 정보
+
+results/experiments/<run-name>/
+  model_comparison.csv
+  <model>/history.json
+  <model>/run_summary.json
+  figures/            학습 곡선·클래스별 F1·혼동행렬·비교표
+```
+
+체크포인트는 크기 때문에 GitHub에서 제외되고, `results/experiments`의 작은 JSON·CSV·PNG는 팀 비교를 위해 GitHub에 올릴 수 있다.
+
+### 여러 PC 결과 비교
+
+각 PC가 겹치지 않는 `--run-name`을 사용한다. 예: `pc_a_resnet18_e50`, `pc_b_efficientnet_e50`, `pc_c_mobilenet_e50`.
+
+각 PC에서 학습 후 결과를 공유한다.
+
+```powershell
+git add results
+git commit -m "Add training result pc_b_efficientnet_e50"
+git pull --rebase
+git push
+```
+
+모든 결과를 한 PC에 `git pull`한 뒤 최종 발표 그래프를 다시 만든다.
+
+```powershell
+.\.venv\Scripts\python.exe .\src\visualize_results.py `
+  .\results\experiments `
+  --output-dir .\results\final_comparison
+```
+
+모델은 Accuracy만으로 고르지 않고 1순위 macro-F1, 2순위 Accuracy, 클래스별 F1과 혼동행렬 순으로 확인한다.
+
 ## GitHub로 팀 코드 공유
 
 이 저장소에는 코드·설정·보고서만 올린다. 얼굴 원본, 라벨, 전처리 이미지, 모델 가중치와 ZIP은 `.gitignore`로 제외된다. 데이터 라이선스와 개인정보 문제 때문에 GitHub 저장소는 `Private`으로 만드는 것을 권장한다.
