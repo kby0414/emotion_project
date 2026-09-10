@@ -1,0 +1,30 @@
+# Python virtual environments and caches
+.venv/
+.venv_*/
+__pycache__/
+*.py[cod]
+
+# Licensed/sensitive face dataset: never commit to GitHub
+dataset/raw/
+dataset/labels/
+dataset/processed/
+transfer/
+*.zip
+
+# Trained weights and generated run outputs
+models/**
+*.pt
+*.pth
+*.ckpt
+work/
+
+# Keep only shareable VS Code project settings
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Windows/editor files
+Thumbs.db
+desktop.ini
+.DS_Store
+*.log
