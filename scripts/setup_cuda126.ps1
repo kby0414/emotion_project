@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
@@ -31,7 +31,8 @@ if (Test-Path $VenvPath) {
         throw "기존 .venv가 불완전합니다. 안전을 위해 자동 삭제하지 않습니다. 이름을 바꾸거나 삭제한 뒤 다시 실행하세요."
     }
     try {
-        $VenvVersion = (& $VenvPython -c "import platform; print(platform.python_version())").Trim()
+        $venvVersion = & $venvPython -c "import platform; print(platform.python_version())"
+        $venvVersion = $venvVersion.Trim()
     }
     catch {
         throw "기존 .venv가 실행되지 않습니다. 진행 중인 작업이 없다면 .venv 이름을 바꾸고 다시 실행하세요."
