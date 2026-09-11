@@ -1,0 +1,4 @@
+﻿rank,run_name,model,completed_epochs,best_epoch,best_accuracy,best_macro_f1,parameters,elapsed_minutes,gpu_name,history_path
+1,GPU_efficientnet_b0_e50_p3_b32,efficientnet_b0,18,15,0.7399554856287655,0.7357474713298793,4016515,232.9558962861697,NVIDIA GeForce RTX 4060,D:\emotion_project\results\experiments\GPU_efficientnet_b0_e50_p3_b32\efficientnet_b0\history.json
+2,GPU_mobilenet_v2_e50_p3_b32,mobilenet_v2,21,18,0.7309183007790016,0.7295767943428108,2232839,153.46464526255926,NVIDIA GeForce RTX 4060,D:\emotion_project\results\experiments\GPU_mobilenet_v2_e50_p3_b32\mobilenet_v2\history.json
+3,GPU_resnet18_e50_p3_b32,resnet18,19,16,0.7275221612494723,0.7253373492741063,11180103,227.85518693129222,NVIDIA GeForce RTX 4060,D:\emotion_project\results\experiments\GPU_resnet18_e50_p3_b32\resnet18\history.json
