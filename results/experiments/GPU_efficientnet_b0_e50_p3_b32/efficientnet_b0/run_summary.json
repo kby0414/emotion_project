@@ -1,0 +1,144 @@
+{
+  "run_name": "GPU_efficientnet_b0_e50_p3_b32",
+  "model": "efficientnet_b0",
+  "target_epochs": 50,
+  "completed_epochs": 18,
+  "stopped_early": true,
+  "patience": 3,
+  "best_epoch": 15,
+  "best_accuracy": 0.7399554856287655,
+  "best_macro_f1": 0.7357474713298793,
+  "best_validation": {
+    "loss": 1.0638471409924914,
+    "accuracy": 0.7399554856287655,
+    "macro_f1": 0.7357474713298793,
+    "per_class": {
+      "기쁨": {
+        "precision": 0.949020127118644,
+        "recall": 0.9562374916611074,
+        "f1": 0.9526151392304113,
+        "support": 7495
+      },
+      "당황": {
+        "precision": 0.7530927835051546,
+        "recall": 0.7841137796860325,
+        "f1": 0.7682902780516664,
+        "support": 7453
+      },
+      "분노": {
+        "precision": 0.7540752149916571,
+        "recall": 0.7876390937122939,
+        "f1": 0.7704918032786885,
+        "support": 7459
+      },
+      "불안": {
+        "precision": 0.6080447603205806,
+        "recall": 0.5428648575671662,
+        "f1": 0.5736091298145507,
+        "support": 7407
+      },
+      "상처": {
+        "precision": 0.5701343801902461,
+        "recall": 0.5087577472379412,
+        "f1": 0.5377002491990032,
+        "support": 7422
+      },
+      "슬픔": {
+        "precision": 0.7222222222222222,
+        "recall": 0.7213531220751437,
+        "f1": 0.7217874105291323,
+        "support": 7479
+      },
+      "중립": {
+        "precision": 0.7807197015284632,
+        "recall": 0.8762663784952046,
+        "f1": 0.8257382892057027,
+        "support": 7403
+      }
+    },
+    "confusion_matrix": [
+      [
+        7167,
+        56,
+        83,
+        38,
+        34,
+        33,
+        84
+      ],
+      [
+        101,
+        5844,
+        260,
+        678,
+        305,
+        77,
+        188
+      ],
+      [
+        70,
+        241,
+        5875,
+        441,
+        363,
+        191,
+        278
+      ],
+      [
+        55,
+        910,
+        588,
+        4021,
+        926,
+        402,
+        505
+      ],
+      [
+        37,
+        506,
+        510,
+        864,
+        3776,
+        1241,
+        488
+      ],
+      [
+        67,
+        86,
+        285,
+        388,
+        979,
+        5395,
+        279
+      ],
+      [
+        55,
+        117,
+        190,
+        183,
+        240,
+        131,
+        6487
+      ]
+    ]
+  },
+  "parameters": 4016515,
+  "elapsed_minutes": 232.9558962861697,
+  "validation_source": "provided",
+  "train_samples": 223570,
+  "validation_samples": 52118,
+  "started_at": "2026-09-10T16:45:17+09:00",
+  "completed_at": "2026-09-10T20:38:15+09:00",
+  "environment": {
+    "computer_name": "실4-03-11",
+    "python": "3.12.10",
+    "torch": "2.13.0+cu126",
+    "torchvision": "0.28.0+cu126",
+    "cuda_runtime": "12.6",
+    "device": "cuda",
+    "gpu_name": "NVIDIA GeForce RTX 4060"
+  },
+  "checkpoint": "D:\\emotion_project\\models\\GPU_efficientnet_b0_e50_p3_b32\\efficientnet_b0\\best.pt",
+  "last_checkpoint": "D:\\emotion_project\\models\\GPU_efficientnet_b0_e50_p3_b32\\efficientnet_b0\\last.pt",
+  "history": "D:\\emotion_project\\models\\GPU_efficientnet_b0_e50_p3_b32\\efficientnet_b0\\history.json"
+}
