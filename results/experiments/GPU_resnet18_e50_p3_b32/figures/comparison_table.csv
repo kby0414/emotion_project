@@ -1,0 +1,2 @@
+﻿rank,run_name,model,best_epoch,best_accuracy,best_macro_f1,gpu_name,history_path
+1,GPU_resnet18_e50_p3_b32,resnet18,16,0.7275221612494723,0.7253373492741063,NVIDIA GeForce RTX 4060,D:\emotion_project\results\experiments\GPU_resnet18_e50_p3_b32\resnet18\history.json

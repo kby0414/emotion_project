@@ -1,0 +1,2 @@
+﻿rank,run_name,model,best_epoch,best_accuracy,best_macro_f1,gpu_name,history_path
+1,GPU_mobilenet_v2_e50_p3_b32,mobilenet_v2,18,0.7309183007790016,0.7295767943428108,NVIDIA GeForce RTX 4060,D:\emotion_project\results\experiments\GPU_mobilenet_v2_e50_p3_b32\mobilenet_v2\history.json

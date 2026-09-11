@@ -1,6 +1,6 @@
 """전처리된 흑백 감정 이미지로 3개 전이학습 모델을 비교한다.
 
-기본 비교 모델: ResNet-18, EfficientNet-B0, MobileNetV3-Small
+기본 비교 모델: ResNet-18, EfficientNet-B0, MobileNetV2
 
 Validation에 Training의 클래스가 모두 없으면 공정한 7개 클래스 비교를 위해
 Training에서 클래스별 10%를 고정 seed로 분리한다.
@@ -37,7 +37,8 @@ from torchvision import models, transforms
 LOGGER = logging.getLogger("emotion-training")
 CLASS_NAMES = ("기쁨", "당황", "분노", "불안", "상처", "슬픔", "중립")
 CLASS_TO_INDEX = {name: index for index, name in enumerate(CLASS_NAMES)}
-MODEL_NAMES = ("resnet18", "efficientnet_b0", "mobilenet_v3_small")
+DEFAULT_MODEL_NAMES = ("resnet18", "efficientnet_b0", "mobilenet_v2")
+MODEL_NAMES = (*DEFAULT_MODEL_NAMES, "mobilenet_v3_small")
 IMAGE_SUFFIXES = {".png"}
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -108,7 +109,7 @@ def parse_args() -> argparse.Namespace:
         "--models",
         nargs="+",
         choices=MODEL_NAMES,
-        default=list(MODEL_NAMES),
+        default=list(DEFAULT_MODEL_NAMES),
     )
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -343,6 +344,14 @@ def build_model(name: str, num_classes: int, pretrained: bool) -> nn.Module:
     if name == "mobilenet_v3_small":
         weights = models.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
         model = models.mobilenet_v3_small(weights=weights)
+        model.classifier[-1] = nn.Linear(
+            model.classifier[-1].in_features, num_classes
+        )
+        return model
+
+    if name == "mobilenet_v2":
+        weights = models.MobileNet_V2_Weights.DEFAULT if pretrained else None
+        model = models.mobilenet_v2(weights=weights)
         model.classifier[-1] = nn.Linear(
             model.classifier[-1].in_features, num_classes
         )
@@ -650,6 +659,16 @@ def main() -> None:
         format="%(asctime)s | %(levelname)s | %(message)s",
     )
     args = parse_args()
+    if not args.no_visualize:
+        try:
+            import matplotlib  # noqa: F401
+        except ImportError as error:
+            raise RuntimeError(
+                "시각화를 사용하려면 현재 Python 환경에 matplotlib이 필요합니다. "
+                "'python -m pip install -r requirements.txt'를 먼저 실행하거나, "
+                "시각화 없이 학습하려면 --no-visualize를 사용하세요."
+            ) from error
+
     args.data_dir = args.data_dir.resolve()
     args.run_name = args.run_name or (
         f"{socket.gethostname()}_{datetime.now():%Y%m%d_%H%M%S}"

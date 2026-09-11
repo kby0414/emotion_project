@@ -1,0 +1,2 @@
+﻿run_name,model,best_epoch,completed_epochs,best_accuracy,best_macro_f1,parameters,elapsed_minutes,checkpoint,history
+GPU_mobilenet_v2_e50_p3_b32,mobilenet_v2,18,21,0.7309183007790016,0.7295767943428108,2232839,153.46464526255926,D:\emotion_project\models\GPU_mobilenet_v2_e50_p3_b32\mobilenet_v2\best.pt,D:\emotion_project\models\GPU_mobilenet_v2_e50_p3_b32\mobilenet_v2\history.json

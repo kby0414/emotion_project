@@ -1,0 +1,2 @@
+﻿run_name,model,best_epoch,completed_epochs,best_accuracy,best_macro_f1,parameters,elapsed_minutes,checkpoint,history
+GPU_resnet18_e50_p3_b32,resnet18,16,19,0.7275221612494723,0.7253373492741063,11180103,227.85518693129222,D:\emotion_project\models\GPU_resnet18_e50_p3_b32\resnet18\best.pt,D:\emotion_project\models\GPU_resnet18_e50_p3_b32\resnet18\history.json
