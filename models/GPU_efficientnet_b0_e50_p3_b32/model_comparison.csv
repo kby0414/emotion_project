@@ -1,0 +1,2 @@
+﻿run_name,model,best_epoch,completed_epochs,best_accuracy,best_macro_f1,parameters,elapsed_minutes,checkpoint,history
+GPU_efficientnet_b0_e50_p3_b32,efficientnet_b0,15,18,0.7399554856287655,0.7357474713298793,4016515,232.9558962861697,D:\emotion_project\models\GPU_efficientnet_b0_e50_p3_b32\efficientnet_b0\best.pt,D:\emotion_project\models\GPU_efficientnet_b0_e50_p3_b32\efficientnet_b0\history.json
