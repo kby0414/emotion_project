@@ -2,7 +2,11 @@
 
 한국인 얼굴 이미지로 `기쁨·당황·분노·불안·상처·슬픔·중립` 7개 감정을 분류하는 프로젝트입니다. 원본 JPG와 라벨 JSON을 보존하고, 학습에는 EXIF 방향을 보정한 `224×224` 흑백 PNG를 사용합니다.
 
-## 최종 결과
+Training 원천 데이터는 시간과 연산 자원을 고려해 감정별 4개 파트 중 2개 파트만 사용했습니다. 전체 파트를 받은 뒤 각 파트의 70~80%를 무작위로 삭제하는 방법도 검토했지만, 다운로드·선별·검증 작업이 늘고 표본 재현도 어려워질 수 있어 파트 단위 선택을 사용했습니다. 라벨 JSON은 전체 범위가 남아 있어 선택하지 않은 파트에 해당하는 193,589건은 대응 JPG가 없습니다. 이는 전처리 실패가 아니라 프로젝트 범위를 의도적으로 줄인 결과입니다.
+
+또한 한 사람이 여러 장의 유사한 표정 이미지를 제공하는 데이터 구조이므로, 같은 인물이나 촬영 세션이 Training과 Validation에 함께 들어가면 검증 성능이 높게 측정될 수 있습니다. 현재 결과는 제공 Validation 기준이며, 새로운 사람에 대한 일반화 성능은 인물·촬영 세션 기준 `group split`으로 추가 검증해야 합니다.
+
+## 실험 결과와 프로그램 구성
 
 | 순위 | 모델 | Accuracy | Macro-F1 | 파라미터 |
 |---:|---|---:|---:|---:|
@@ -10,10 +14,10 @@
 | 2 | MobileNetV2 | 0.7309 | 0.7296 | 2.23M |
 | 3 | ResNet18 | 0.7275 | 0.7253 | 11.18M |
 
-- 최종 정확도 1위이자 프로그램 개발의 기본 후보는 `EfficientNet-B0`입니다.
-- 실시간 속도와 모델 크기가 더 중요하면 `MobileNetV2`도 비교합니다.
+- 현재 Validation에서는 `EfficientNet-B0`가 두 지표 모두 가장 높지만 단일 최종 모델로 고정하지 않습니다.
+- 웹캠 프로그램은 `ResNet18`, `MobileNetV2`, `EfficientNet-B0`를 모두 탑재하고 선택 실행과 비교 실행을 지원합니다.
 - 세 모델은 동일한 Training 223,570장과 Validation 52,118장으로 평가했습니다.
-- 최종 그래프와 비교표는 `results/comparisons/all_three_models/`에 있습니다.
+- 통합 그래프와 비교표는 `results/comparisons/all_three_models/`에 있습니다.
 
 ## 폴더 구조
 
@@ -35,7 +39,7 @@ emotion_project/
 ├─ results/
 │  ├─ preprocessing_eda_report.md      전처리·EDA 발표 근거
 │  ├─ experiments/                    모델별 history와 run_summary
-│  └─ comparisons/all_three_models/   최종 3모델 표·그래프
+│  └─ comparisons/all_three_models/   3모델 통합 표·그래프
 ├─ scripts/
 │  └─ setup_cuda126.ps1               Python/CUDA 가상환경 구성
 ├─ src/
@@ -61,11 +65,13 @@ emotion_project/
 
 ```text
 models/GPU_efficientnet_b0_e50_p3_b32/efficientnet_b0/best.pt
+models/GPU_mobilenet_v2_e50_p3_b32/mobilenet_v2/best.pt
+models/GPU_resnet18_e50_p3_b32/resnet18/best.pt
 ```
 
-`best.pt`에는 모델 이름, 가중치, 클래스 순서, 입력 크기, 정규화 값과 최고 검증 지표가 들어 있습니다. `last.pt`는 학습 재개용이므로 최종 정리에서 제거했습니다.
+각 `best.pt`에는 모델 이름, 가중치, 클래스 순서, 입력 크기, 정규화 값과 최고 검증 지표가 들어 있습니다. 프로그램은 선택한 모델만 실행하는 일반 모드와 세 모델 결과를 함께 보여 주는 비교 모드를 지원하도록 구성합니다. `last.pt`는 학습 재개용이므로 정리 과정에서 제거했습니다.
 
-현재 GitHub에는 최종 후보인 EfficientNet-B0의 `best.pt`만 Git LFS로 공유합니다. MobileNetV2와 ResNet18의 `best.pt`는 비교·백업을 위해 이 컴퓨터에만 보관하며 기본 `.gitignore` 대상입니다.
+프로그램 담당자에게는 세 모델의 `best.pt`가 모두 필요합니다. GitHub로 공유할 때는 세 파일을 Git LFS 대상으로 추가해야 하며, 현재 `.gitignore`가 모델 폴더를 제외하므로 명시적으로 추가하거나 예외 규칙을 설정해야 합니다.
 
 GitHub에서 모델까지 내려받으려면 Git LFS가 필요합니다.
 
@@ -114,7 +120,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 기본 비교 모델은 `resnet18`, `efficientnet_b0`, `mobilenet_v2`입니다. CUDA를 사용할 수 있으면 자동으로 GPU를 선택합니다.
 
-### 최종 비교 그래프 재생성
+### 통합 비교 그래프 재생성
 
 ```powershell
 .\.venv\Scripts\python.exe .\src\visualize_results.py `
@@ -128,5 +134,5 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 - `dataset/raw`, `dataset/labels`, `dataset/processed`는 개인정보와 라이선스 때문에 GitHub에 올리지 않습니다.
 - `transfer/processed_dataset`은 다른 PC로 데이터를 전달할 때만 사용하며 GitHub에서 제외됩니다.
-- 모델별 최종 `best.pt`만 보관하고, 학습 재개용 `last.pt`는 최종 정리 후 제거합니다.
+- 모델별 `best.pt`를 모두 보관하고, 학습 재개용 `last.pt`는 정리 후 제거합니다.
 - 모델별 수치 기록은 `results/experiments`, 발표용 통합 그림은 `results/comparisons/all_three_models`에서 관리합니다.

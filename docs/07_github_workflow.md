@@ -34,7 +34,7 @@ git --version
 
 ## 4. 다른 PC에서 처음 받기
 
-최종 EfficientNet-B0 모델은 Git LFS로 관리하므로 Git LFS도 필요하다.
+세 모델의 `best.pt`는 Git LFS로 관리해야 하므로 Git LFS도 필요하다.
 
 ```powershell
 git lfs install
@@ -95,13 +95,15 @@ git push origin main
 
 일반 GitHub 파일은 크기 제한 때문에 학습 모델에 적합하지 않을 수 있다. 현재 `.gitattributes`는 `*.pt`를 Git LFS 대상으로 지정한다.
 
-최종 공유 대상은 다음 파일이다.
+프로그램 개발을 위한 공유 대상은 다음 세 파일이다.
 
 ```text
 models/GPU_efficientnet_b0_e50_p3_b32/efficientnet_b0/best.pt
+models/GPU_mobilenet_v2_e50_p3_b32/mobilenet_v2/best.pt
+models/GPU_resnet18_e50_p3_b32/resnet18/best.pt
 ```
 
-MobileNetV2와 ResNet18의 `best.pt`는 로컬 비교·백업용이며 현재 `.gitignore` 규칙상 GitHub에 자동으로 추가되지 않는다.
+현재 `.gitignore`는 모델 폴더와 `*.pt`를 제외한다. 세 파일을 GitHub로 공유할 때는 Git LFS 설정을 확인한 뒤 해당 경로만 명시적으로 추가하거나 `.gitignore`에 세 경로의 예외를 설정한다.
 
 ## 9. 절대 올리지 않을 항목
 
@@ -126,4 +128,3 @@ git log -3 --oneline
 Your branch is up to date with 'origin/main'.
 nothing to commit, working tree clean
 ```
-
