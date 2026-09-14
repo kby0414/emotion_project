@@ -53,6 +53,10 @@ emotion_project/
 
 ## 핵심 파일
 
+### 단계별 문서
+
+환경 구성, 전처리, 모델 학습, 결과 평가, 데이터 이전, GitHub 협업과 발표 Q&A는 `docs/README.md`에서 순서대로 확인할 수 있습니다.
+
 ### 프로그램 개발용 모델
 
 ```text
@@ -103,7 +107,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\.venv\Scripts\python.exe .\src\train_models.py `
   --models efficientnet_b0 `
   --epochs 50 `
-  --patience 7 `
+  --patience 3 `
   --batch-size 32 `
   --run-name GPU_efficientnet_b0_e50_p3_b32
 ```

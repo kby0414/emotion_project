@@ -150,7 +150,7 @@ Training은 1:05:47, Validation은 0:29:48, 전체는 1:35:35가 걸렸다. 재�
 ## 8. 모델 실험에 연결할 때
 
 - 현재 Validation에는 7개 클래스가 모두 있으므로 `train_models.py`의 기본 `auto` 설정은 제공 Validation을 사용한다.
-- 비교 모델은 ResNet-18, EfficientNet-B0, MobileNetV3-Small이다.
+- 비교 모델은 ResNet-18, EfficientNet-B0, MobileNetV2다.
 - 주 평가지표는 클래스가 균형적이어도 정확도와 macro-F1을 함께 사용한다.
 - 공식 분할 결과와 식별자 기반 group split 결과를 함께 비교해야 일반화 주장을 강화할 수 있다.
 - 흑백화 효과를 검증하려면 향후 동일 split에서 RGB 전처리 결과와 ablation test를 진행한다.
