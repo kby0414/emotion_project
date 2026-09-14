@@ -13,10 +13,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
+# 대용량 파일을 일정 크기로 나누어 읽어 메모리 사용량을 제한한다.
 COPY_BUFFER_SIZE = 8 * 1024 * 1024
 
 
 def parse_args() -> argparse.Namespace:
+    """manifest 위치와 복원할 대상 폴더 옵션을 읽는다."""
     project_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description="전처리 데이터 ZIP 검증 및 복원")
     parser.add_argument(
@@ -38,6 +40,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def sha256_file(path: Path) -> str:
+    """복사 전후 파일이 같은지 비교하기 위한 SHA-256 값을 계산한다."""
     digest = hashlib.sha256()
     with path.open("rb") as file:
         while block := file.read(COPY_BUFFER_SIZE):
@@ -46,6 +49,7 @@ def sha256_file(path: Path) -> str:
 
 
 def safe_destination(target_dir: Path, member_name: str) -> Path:
+    """ZIP 내부 경로가 대상 폴더 밖을 가리키지 못하도록 검사한다."""
     member = PurePosixPath(member_name)
     if member.is_absolute() or not member.parts or ".." in member.parts:
         raise RuntimeError(f"안전하지 않은 ZIP 경로: {member_name}")
@@ -60,6 +64,7 @@ def safe_destination(target_dir: Path, member_name: str) -> Path:
 
 
 def verify_archives(bundle_dir: Path, manifest: dict[str, Any]) -> list[Path]:
+    """모든 분할 ZIP의 존재 여부, 크기, SHA-256 해시를 검증한다."""
     archives: list[Path] = []
     for record in manifest.get("archives", []):
         archive_path = bundle_dir / record["name"]
@@ -81,6 +86,7 @@ def verify_archives(bundle_dir: Path, manifest: dict[str, Any]) -> list[Path]:
 
 
 def main() -> None:
+    """묶음을 검증하고 임시 파일을 거쳐 안전하게 전처리 폴더를 복원한다."""
     args = parse_args()
     started = time.perf_counter()
     manifest_path = args.manifest.resolve()
@@ -98,6 +104,7 @@ def main() -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
 
     archives = verify_archives(manifest_path.parent, manifest)
+    # 동일 파일이 여러 ZIP에 중복되면 덮어쓰기 순서에 따라 결과가 달라지므로 막는다.
     seen_members: set[str] = set()
     extracted = 0
 
@@ -116,6 +123,7 @@ def main() -> None:
 
                 destination = safe_destination(target_dir, info.filename)
                 destination.parent.mkdir(parents=True, exist_ok=True)
+                # 복원 도중 중단되어도 불완전한 파일이 정상 파일명으로 남지 않게 한다.
                 temporary_path = destination.with_name(destination.name + ".transfer.tmp")
                 with archive.open(info, "r") as source, temporary_path.open("wb") as target:
                     shutil.copyfileobj(source, target, COPY_BUFFER_SIZE)
@@ -132,6 +140,7 @@ def main() -> None:
     if sha256_file(summary_path) != manifest["source_summary_sha256"]:
         raise RuntimeError("복원된 preprocessing_summary.json의 SHA-256이 다릅니다.")
 
+    # 마지막으로 이미지와 라벨 개수까지 원본 manifest와 같은지 확인한다.
     for key, expected in manifest.get("counts", {}).items():
         category, split = key.split("/", 1)
         suffix = "*.png" if category == "images" else "*.json"

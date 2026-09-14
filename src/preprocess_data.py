@@ -25,6 +25,7 @@ from typing import Any, Iterable
 from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
 
 
+# 로그 이름과 반복해서 사용하는 확장자·좌표 키를 한곳에서 관리한다.
 LOGGER = logging.getLogger("emotion-preprocess")
 IMAGE_SUFFIXES = {".jpg", ".jpeg"}
 BOX_KEYS = ("minX", "minY", "maxX", "maxY")
@@ -32,7 +33,7 @@ BOX_KEYS = ("minX", "minY", "maxX", "maxY")
 
 @dataclass(frozen=True)
 class ImageTransform:
-    """원본 좌표를 결과 이미지 좌표로 옮기는 데 필요한 정보."""
+    """한 이미지의 회전·축소·패딩 결과와 라벨 좌표 변환 정보를 보관한다."""
 
     source_relative_path: str
     output_relative_path: str
@@ -51,6 +52,7 @@ class ImageTransform:
 
 
 def parse_args() -> argparse.Namespace:
+    """전처리 입력·출력 경로와 이미지 변환 옵션을 읽고 값의 범위를 검사한다."""
     script_path = Path(__file__).resolve()
     default_project_root = script_path.parent.parent
 
@@ -168,6 +170,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def find_images(folder: Path) -> list[Path]:
+    """하위 폴더 구조와 관계없이 모든 JPG/JPEG 파일을 재귀적으로 찾는다."""
     return sorted(
         path
         for path in folder.rglob("*")
@@ -176,10 +179,12 @@ def find_images(folder: Path) -> list[Path]:
 
 
 def png_relative_path(image_path: Path, split_dir: Path) -> Path:
+    """원본의 하위 폴더 구조는 유지하고 확장자만 .png로 바꾼다."""
     return image_path.relative_to(split_dir).with_suffix(".png")
 
 
 def check_output_collisions(images: Iterable[Path], split_dir: Path) -> None:
+    """여러 원본이 같은 출력 PNG 또는 같은 라벨 filename으로 겹치는지 확인한다."""
     seen: dict[str, Path] = {}
     seen_basenames: dict[str, Path] = {}
     for image_path in images:
@@ -203,7 +208,7 @@ def check_output_collisions(images: Iterable[Path], split_dir: Path) -> None:
 
 
 def oriented_size(width: int, height: int, orientation: int) -> tuple[int, int]:
-    """Return dimensions after applying the EXIF orientation transform."""
+    """EXIF 방향 보정을 적용한 뒤의 가로·세로 크기를 계산한다."""
     if orientation in (5, 6, 7, 8):
         return height, width
     return width, height
@@ -216,7 +221,7 @@ def orient_point(
     height: int,
     orientation: int,
 ) -> tuple[float, float]:
-    """Apply an EXIF orientation to one point in the original coordinate space."""
+    """원본 픽셀 좌표 한 점에 EXIF 회전·반전을 적용한다."""
     transforms = {
         1: lambda px, py: (px, py),
         2: lambda px, py: (width - px, py),
@@ -231,6 +236,7 @@ def orient_point(
 
 
 def format_duration(seconds: float) -> str:
+    """초 단위 시간을 터미널에서 읽기 쉬운 HH:MM:SS 문자열로 바꾼다."""
     total_seconds = max(0, round(seconds))
     hours, remainder = divmod(total_seconds, 3600)
     minutes, secs = divmod(remainder, 60)
@@ -240,7 +246,7 @@ def format_duration(seconds: float) -> str:
 def configure_pillow_worker(
     max_megapixels: float, allow_truncated: bool
 ) -> None:
-    """Configure Pillow inside each spawned Windows worker process."""
+    """Windows에서 생성된 각 작업 프로세스에 Pillow 안전 옵션을 적용한다."""
     Image.MAX_IMAGE_PIXELS = int(max_megapixels * 1_000_000)
     ImageFile.LOAD_TRUNCATED_IMAGES = allow_truncated
 
@@ -256,6 +262,11 @@ def preprocess_one_image(
     label_coordinate_space: str,
     png_compress_level: int,
 ) -> ImageTransform:
+    """이미지 한 장을 방향 보정한 224×224 흑백 PNG로 변환한다.
+
+    원본 비율을 유지해 축소한 뒤 중앙에 패딩하며, 같은 변환을 JSON 얼굴
+    박스에도 적용할 수 있도록 :class:`ImageTransform`을 반환한다.
+    """
     relative = image_path.relative_to(split_dir)
     output_relative = relative.with_suffix(".png")
     output_path = output_split_dir / output_relative
@@ -278,6 +289,7 @@ def preprocess_one_image(
                 original_width, original_height, exif_orientation
             )
 
+            # 긴 변을 size에 맞추는 letterbox 방식이라 얼굴 비율이 찌그러지지 않는다.
             scale = min(size / oriented_width, size / oriented_height)
             resized_width = max(1, round(oriented_width * scale))
             resized_height = max(1, round(oriented_height * scale))
@@ -304,6 +316,7 @@ def preprocess_one_image(
                 if channels == 3:
                     canvas = canvas.convert("RGB")
 
+                # 임시 파일을 완성 후 교체하여 강제 종료 시 깨진 PNG가 남는 것을 막는다.
                 temporary_path = output_path.with_suffix(".png.tmp")
                 canvas.save(
                     temporary_path,
@@ -337,12 +350,14 @@ def preprocess_one_image(
 
 
 def normalized_label_key(value: str) -> str:
+    """Windows/Unix 경로 구분자와 대소문자 차이를 제거해 비교용 키를 만든다."""
     return value.replace("\\", "/").lstrip("./").casefold()
 
 
 def make_transform_lookup(
     transforms: list[ImageTransform],
 ) -> tuple[dict[str, ImageTransform], dict[str, ImageTransform]]:
+    """라벨 filename을 이미지 변환 정보에 연결할 두 가지 검색표를 만든다."""
     by_relative_path: dict[str, ImageTransform] = {}
     basename_candidates: dict[str, list[ImageTransform]] = {}
 
@@ -366,6 +381,7 @@ def lookup_transform(
     by_relative_path: dict[str, ImageTransform],
     by_unique_basename: dict[str, ImageTransform],
 ) -> ImageTransform | None:
+    """상대 경로를 먼저 찾고, 실패하면 중복 없는 파일명으로 한 번 더 찾는다."""
     normalized = normalized_label_key(filename)
     transform = by_relative_path.get(normalized)
     if transform is not None:
@@ -374,6 +390,7 @@ def lookup_transform(
 
 
 def replace_jpg_with_png(filename: str) -> str:
+    """라벨에 기록된 .jpg/.jpeg 확장자를 대소문자와 무관하게 .png로 바꾼다."""
     return re.sub(r"(?i)\.jpe?g$", ".png", filename)
 
 
@@ -412,6 +429,7 @@ def update_boxes(value: Any, transform: ImageTransform) -> int:
                 oriented_x = [point[0] for point in oriented_corners]
                 oriented_y = [point[1] for point in oriented_corners]
 
+                # 축소 배율과 중앙 패딩 오프셋을 적용하고 224×224 범위로 제한한다.
                 boxes["minX"] = max(
                     0.0,
                     min(
@@ -458,7 +476,10 @@ def update_label_tree(
     by_unique_basename: dict[str, ImageTransform],
     drop_unmatched: bool,
 ) -> tuple[int, int, list[str]]:
-    """filename이 있는 레코드를 찾아 파일명과 해당 레코드의 박스를 수정한다."""
+    """중첩 JSON을 재귀 순회하며 filename과 그 레코드의 박스를 수정한다.
+
+    반환값은 매칭 레코드 수, 변환 박스 수, 매칭 실패 filename 목록이다.
+    """
     matched_records = 0
     updated_boxes = 0
     unmatched_filenames: list[str] = []
@@ -514,6 +535,7 @@ def process_labels(
     strict: bool,
     keep_unmatched_labels: bool,
 ) -> dict[str, Any]:
+    """한 split의 모든 JSON을 이미지 변환 결과와 맞춰 새 라벨 폴더에 저장한다."""
     if not labels_split_dir.exists():
         LOGGER.warning("라벨 폴더가 없어 건너뜁니다: %s", labels_split_dir)
         return {
@@ -547,6 +569,7 @@ def process_labels(
             labels_split_dir
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        # 이미지와 마찬가지로 JSON도 원자적으로 교체해 중단된 파일을 구별한다.
         temporary_path = output_path.with_suffix(".json.tmp")
         with temporary_path.open("w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
@@ -572,6 +595,7 @@ def process_labels(
 
 
 def process_split(args: argparse.Namespace, split: str) -> dict[str, Any]:
+    """Training 또는 Validation 하나의 이미지와 라벨을 처리하고 통계를 반환한다."""
     split_started = time.perf_counter()
     raw_split_dir = args.raw_dir / split
     labels_split_dir = args.labels_dir / split
@@ -581,6 +605,7 @@ def process_split(args: argparse.Namespace, split: str) -> dict[str, Any]:
     if not raw_split_dir.exists():
         raise FileNotFoundError(f"이미지 폴더가 없습니다: {raw_split_dir}")
 
+    # EMOIMG_기쁨_TRAIN_01 같은 추가 하위 폴더가 있어도 재귀 탐색으로 모두 포함한다.
     images = find_images(raw_split_dir)
     check_output_collisions(images, raw_split_dir)
     relative_paths = [path.relative_to(raw_split_dir) for path in images]
@@ -710,6 +735,7 @@ def process_split(args: argparse.Namespace, split: str) -> dict[str, Any]:
 
 
 def main() -> None:
+    """요청한 모든 split을 순서대로 처리하고 전체 요약 JSON과 시간을 기록한다."""
     total_started = time.perf_counter()
     logging.basicConfig(
         level=logging.INFO,
@@ -750,6 +776,7 @@ def main() -> None:
     summary["total_elapsed_seconds"] = total_elapsed_seconds
     summary["total_elapsed_hhmmss"] = format_duration(total_elapsed_seconds)
 
+    # 이 파일은 전처리 완료 증빙이자 이후 패키징 단계의 개수 검증 기준이다.
     summary_path = args.output_dir / "preprocessing_summary.json"
     temporary_path = summary_path.with_suffix(".json.tmp")
     with temporary_path.open("w", encoding="utf-8") as file:

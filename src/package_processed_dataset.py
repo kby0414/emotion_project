@@ -13,12 +13,14 @@ from pathlib import Path
 from typing import Any
 
 
+# 묶음 파일명과 manifest 이름은 복원 스크립트에서도 같은 규칙을 사용한다.
 ARCHIVE_PREFIX = "processed_dataset_part_"
 MANIFEST_NAME = "transfer_manifest.json"
 COPY_BUFFER_SIZE = 8 * 1024 * 1024
 
 
 def parse_args() -> argparse.Namespace:
+    """전처리 폴더, 저장 위치, ZIP 한 개의 최대 크기를 입력받는다."""
     project_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
         description="전처리가 끝난 데이터셋을 검증 가능한 분할 ZIP으로 생성"
@@ -51,6 +53,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def sha256_file(path: Path) -> str:
+    """큰 파일도 메모리에 전부 올리지 않고 SHA-256 해시를 계산한다."""
     digest = hashlib.sha256()
     with path.open("rb") as file:
         while block := file.read(COPY_BUFFER_SIZE):
@@ -59,12 +62,14 @@ def sha256_file(path: Path) -> str:
 
 
 def collect_and_validate(processed_dir: Path) -> tuple[list[Path], dict[str, Any], dict[str, int]]:
+    """전처리 완료 여부와 summary의 이미지·라벨 개수를 실제 파일과 대조한다."""
     summary_path = processed_dir / "preprocessing_summary.json"
     if not summary_path.is_file():
         raise RuntimeError(
             "preprocessing_summary.json이 없습니다. 전처리가 완전히 끝난 뒤 실행하세요."
         )
 
+    # .tmp가 남아 있다면 강제 종료 등으로 아직 완성되지 않은 파일일 수 있다.
     temporary_files = [path for path in processed_dir.rglob("*") if path.is_file() and path.name.endswith(".tmp")]
     if temporary_files:
         raise RuntimeError(f"임시 파일이 {len(temporary_files)}개 남아 있습니다. 전처리 중일 수 있습니다.")
@@ -96,6 +101,7 @@ def collect_and_validate(processed_dir: Path) -> tuple[list[Path], dict[str, Any
 
 
 def split_files(files: list[Path], max_bytes: int) -> list[list[Path]]:
+    """원본 파일 크기 합이 제한을 넘지 않도록 파일 목록을 여러 묶음으로 나눈다."""
     chunks: list[list[Path]] = []
     current: list[Path] = []
     current_bytes = 0
@@ -115,6 +121,7 @@ def split_files(files: list[Path], max_bytes: int) -> list[list[Path]]:
 
 
 def main() -> None:
+    """데이터 검증 → 분할 ZIP 생성 → 해시 manifest 저장 순서로 실행한다."""
     args = parse_args()
     started = time.perf_counter()
     processed_dir = args.processed_dir.resolve()
@@ -151,6 +158,7 @@ def main() -> None:
     archive_records: list[dict[str, Any]] = []
     completed_files = 0
 
+    # 각 ZIP을 임시 이름으로 완성한 뒤 최종 이름으로 바꿔 중단 시 손상을 구별한다.
     for index, chunk in enumerate(chunks, start=1):
         archive_name = f"{ARCHIVE_PREFIX}{index:03d}.zip"
         archive_path = output_dir / archive_name
@@ -176,6 +184,7 @@ def main() -> None:
             }
         )
 
+    # 다른 PC에서는 아래 해시와 개수를 사용해 복사 중 손상 여부를 확인한다.
     manifest = {
         "schema_version": 1,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),

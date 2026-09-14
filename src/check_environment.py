@@ -7,6 +7,7 @@ import platform
 import sys
 
 
+# 팀원 PC에서도 같은 결과를 재현할 수 있도록 프로젝트의 기준 버전을 고정한다.
 EXPECTED_PYTHON = (3, 12, 10)
 EXPECTED_TORCH = "2.13.0+cu126"
 EXPECTED_TORCHVISION = "0.28.0+cu126"
@@ -16,6 +17,7 @@ EXPECTED_CUDA = "12.6"
 
 
 def parse_args() -> argparse.Namespace:
+    """환경 검사 방식에 관한 명령행 옵션을 읽는다."""
     parser = argparse.ArgumentParser(description="Python/PyTorch/CUDA 환경 확인")
     parser.add_argument(
         "--allow-cpu",
@@ -31,8 +33,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """패키지 버전, CUDA 인식 여부, 실제 GPU 연산을 차례로 검증한다."""
     args = parse_args()
 
+    # import 자체가 실패하면 설치가 덜 되었거나 다른 가상환경을 선택한 경우다.
     try:
         import matplotlib
         import PIL
@@ -55,6 +59,7 @@ def main() -> None:
     for name, value in actual.items():
         print(f"[ENV] {name}: {value}")
 
+    # --skip-version-check를 쓰지 않은 기본 실행에서는 lock 파일 기준과 정확히 비교한다.
     mismatches: list[str] = []
     if not args.skip_version_check:
         expected = {
@@ -72,6 +77,8 @@ def main() -> None:
                 )
 
     if torch.cuda.is_available():
+        # torch.cuda.is_available()만 확인하면 드라이버 문제를 놓칠 수 있으므로
+        # 행렬 곱셈을 실행하고 synchronize()로 GPU 작업 완료까지 기다린다.
         device = torch.device("cuda:0")
         properties = torch.cuda.get_device_properties(device)
         print("[GPU] name:", properties.name)

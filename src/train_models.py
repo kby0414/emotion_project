@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
 
+# 클래스 순서는 학습 target, 혼동행렬, 저장 모델에서 모두 동일해야 한다.
 LOGGER = logging.getLogger("emotion-training")
 CLASS_NAMES = ("기쁨", "당황", "분노", "불안", "상처", "슬픔", "중립")
 CLASS_TO_INDEX = {name: index for index, name in enumerate(CLASS_NAMES)}
@@ -46,12 +47,16 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 @dataclass(frozen=True)
 class Sample:
+    """이미지 경로와 신경망이 사용하는 정수 클래스 번호 한 쌍."""
+
     path: Path
     target: int
 
 
 @dataclass
 class Metrics:
+    """한 epoch에서 계산한 전체 및 클래스별 평가 지표."""
+
     loss: float
     accuracy: float
     macro_f1: float
@@ -60,18 +65,23 @@ class Metrics:
 
 
 class EmotionDataset(Dataset[tuple[torch.Tensor, int]]):
+    """전처리 PNG를 필요할 때 열어 텐서와 정답 번호로 반환한다."""
+
     def __init__(
         self,
         samples: Sequence[Sample],
         transform: Callable[[Image.Image], torch.Tensor],
     ) -> None:
+        """샘플 목록과 학습/검증용 이미지 변환을 저장한다."""
         self.samples = samples
         self.transform = transform
 
     def __len__(self) -> int:
+        """DataLoader가 순회할 전체 이미지 수를 반환한다."""
         return len(self.samples)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
+        """한 이미지를 읽고 변환한 뒤 (입력 텐서, 정답 번호)를 반환한다."""
         sample = self.samples[index]
         with Image.open(sample.path) as image:
             # 저장 파일은 1채널 흑백이지만 ImageNet 사전학습 모델 입력은 3채널이다.
@@ -81,9 +91,10 @@ class EmotionDataset(Dataset[tuple[torch.Tensor, int]]):
 
 
 def parse_args() -> argparse.Namespace:
+    """데이터 경로, 모델 목록, 학습 하이퍼파라미터를 읽고 검증한다."""
     project_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
-        description="ResNet18/EfficientNet-B0/MobileNetV3-Small 감정 분류 비교"
+        description="ResNet18/EfficientNet-B0/MobileNetV2 감정 분류 비교"
     )
     parser.add_argument(
         "--data-dir",
@@ -160,6 +171,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def seed_everything(seed: int) -> None:
+    """데이터 분리와 가중치 학습의 재현성을 위해 난수 시드를 고정한다."""
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -169,6 +181,7 @@ def seed_everything(seed: int) -> None:
 
 
 def atomic_write_json(path: Path, value: object) -> None:
+    """JSON을 임시 파일에 완성한 뒤 교체하여 중단 시 손상을 줄인다."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
@@ -179,6 +192,7 @@ def atomic_write_json(path: Path, value: object) -> None:
 
 
 def atomic_torch_save(path: Path, value: object) -> None:
+    """PyTorch 체크포인트를 임시 파일에 저장한 뒤 최종 이름으로 교체한다."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(value, temporary)
@@ -186,6 +200,7 @@ def atomic_torch_save(path: Path, value: object) -> None:
 
 
 def runtime_info(device: torch.device) -> dict[str, str | int | None]:
+    """서로 다른 PC의 실험 결과를 비교할 수 있도록 실행 환경을 기록한다."""
     gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else None
     return {
         "computer_name": socket.gethostname(),
@@ -199,6 +214,7 @@ def runtime_info(device: torch.device) -> dict[str, str | int | None]:
 
 
 def label_from_filename(path: Path) -> str | None:
+    """데이터 파일명의 네 번째 '_' 구간에서 7개 감정 중 하나를 읽는다."""
     parts = path.stem.split("_")
     if len(parts) < 4:
         return None
@@ -207,6 +223,7 @@ def label_from_filename(path: Path) -> str | None:
 
 
 def scan_samples(folder: Path) -> list[Sample]:
+    """폴더 아래 PNG를 재귀 탐색하고 파일명의 감정을 학습 target으로 바꾼다."""
     if not folder.exists():
         raise FileNotFoundError(f"데이터 폴더가 없습니다: {folder}")
 
@@ -233,12 +250,14 @@ def scan_samples(folder: Path) -> list[Sample]:
 
 
 def present_class_names(samples: Sequence[Sample]) -> set[str]:
+    """샘플 목록에 실제 포함된 감정 클래스 집합을 반환한다."""
     return {CLASS_NAMES[sample.target] for sample in samples}
 
 
 def stratified_split(
     samples: Sequence[Sample], val_ratio: float, seed: int
 ) -> tuple[list[Sample], list[Sample]]:
+    """각 감정의 비율을 유지하며 Training을 새 학습/검증 집합으로 나눈다."""
     grouped: dict[int, list[Sample]] = defaultdict(list)
     for sample in samples:
         grouped[sample.target].append(sample)
@@ -246,6 +265,7 @@ def stratified_split(
     generator = random.Random(seed)
     train_samples: list[Sample] = []
     val_samples: list[Sample] = []
+    # 모든 클래스에서 최소 한 장 이상을 검증에 배정해 macro-F1 비교를 가능하게 한다.
     for target in range(len(CLASS_NAMES)):
         group = grouped[target]
         if len(group) < 2:
@@ -268,6 +288,7 @@ def choose_train_and_validation(
     val_ratio: float,
     seed: int,
 ) -> tuple[list[Sample], list[Sample], str]:
+    """제공 Validation을 쓸지 Training 층화 분리를 쓸지 정책에 따라 결정한다."""
     all_training = scan_samples(data_dir / "Training")
     provided_folder = data_dir / "Validation"
     provided = scan_samples(provided_folder) if provided_folder.exists() else []
@@ -285,6 +306,7 @@ def choose_train_and_validation(
             )
         return all_training, provided, "provided"
 
+    # auto에서는 제공 Validation의 클래스 구성이 Training과 완전히 같을 때만 사용한다.
     use_stratified = validation_source == "stratified" or (
         validation_source == "auto" and training_classes != provided_classes
     )
@@ -304,6 +326,8 @@ def choose_train_and_validation(
 
 
 def make_transforms() -> tuple[transforms.Compose, transforms.Compose]:
+    """학습에는 약한 증강을, 검증에는 결정적인 변환만 적용하도록 구성한다."""
+    # 좌우 반전과 작은 이동·회전·확대만 사용해 표정을 유지하면서 과적합을 줄인다.
     train_transform = transforms.Compose(
         [
             transforms.RandomHorizontalFlip(p=0.5),
@@ -314,6 +338,7 @@ def make_transforms() -> tuple[transforms.Compose, transforms.Compose]:
                 fill=0,
             ),
             transforms.ToTensor(),
+            # 세 모델 모두 ImageNet 사전학습 가중치를 사용하므로 같은 통계로 정규화한다.
             transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
     )
@@ -327,6 +352,7 @@ def make_transforms() -> tuple[transforms.Compose, transforms.Compose]:
 
 
 def build_model(name: str, num_classes: int, pretrained: bool) -> nn.Module:
+    """선택한 torchvision 모델을 만들고 마지막 분류층을 7개 감정용으로 교체한다."""
     if name == "resnet18":
         weights = models.ResNet18_Weights.DEFAULT if pretrained else None
         model = models.resnet18(weights=weights)
@@ -361,12 +387,14 @@ def build_model(name: str, num_classes: int, pretrained: bool) -> nn.Module:
 
 
 def confusion_metrics(confusion: torch.Tensor) -> tuple[float, float, dict]:
+    """혼동행렬에서 Accuracy, 클래스별 지표, Macro-F1을 계산한다."""
     confusion = confusion.to(torch.float64)
     total = confusion.sum().item()
     accuracy = confusion.diag().sum().item() / total if total else 0.0
     class_report: dict[str, dict[str, float | int]] = {}
     supported_f1: list[float] = []
 
+    # Macro-F1은 표본이 많은 클래스가 결과를 독점하지 않도록 클래스 F1을 동일 가중 평균한다.
     for index, name in enumerate(CLASS_NAMES):
         true_positive = confusion[index, index].item()
         support = int(confusion[index, :].sum().item())
@@ -399,6 +427,10 @@ def run_epoch(
     optimizer: AdamW | None,
     scaler: torch.amp.GradScaler | None,
 ) -> Metrics:
+    """DataLoader를 한 번 순회하며 학습하거나, 가중치 변경 없이 검증한다.
+
+    optimizer가 전달되면 학습 모드, None이면 검증 모드로 동작한다.
+    """
     training = optimizer is not None
     model.train(training)
     confusion = torch.zeros(
@@ -413,6 +445,7 @@ def run_epoch(
         if training:
             optimizer.zero_grad(set_to_none=True)
 
+        # 검증 시에는 gradient를 만들지 않아 GPU 메모리와 계산량을 줄인다.
         with torch.set_grad_enabled(training):
             with torch.autocast(
                 device_type=device.type,
@@ -423,6 +456,7 @@ def run_epoch(
                 loss = criterion(logits, targets)
 
             if training:
+                # CUDA에서는 AMP가 연산을 FP16으로 수행하되 GradScaler가 underflow를 막는다.
                 assert scaler is not None
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -432,6 +466,7 @@ def run_epoch(
         batch_size = targets.size(0)
         loss_sum += loss.item() * batch_size
         sample_count += batch_size
+        # (정답, 예측) 쌍을 하나의 번호로 인코딩해 혼동행렬을 반복문 없이 누적한다.
         encoded = targets.detach().cpu() * len(CLASS_NAMES) + predictions.detach().cpu()
         confusion += torch.bincount(
             encoded, minlength=len(CLASS_NAMES) ** 2
@@ -459,14 +494,17 @@ def train_one_model(
     validation_source: str,
     environment: dict[str, str | int | None],
 ) -> dict:
+    """모델 하나를 학습하고 최고/마지막 체크포인트와 결과 지표를 저장한다."""
     LOGGER.info("%s 학습 시작", model_name)
     model = build_model(
         model_name, len(CLASS_NAMES), pretrained=not args.no_pretrained
     ).to(device)
+    # label smoothing과 weight decay는 한 클래스에 지나치게 확신하는 과적합을 완화한다.
     criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
     optimizer = AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
+    # 학습 후반으로 갈수록 학습률을 부드럽게 낮춰 세밀하게 수렴시킨다.
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
@@ -491,6 +529,7 @@ def train_one_model(
     started = time.time()
 
     if args.resume:
+        # last.pt에는 optimizer/scheduler까지 있어 중단 직전 상태에서 이어갈 수 있다.
         if not last_path.is_file():
             raise FileNotFoundError(f"재개할 체크포인트가 없습니다: {last_path}")
         checkpoint = torch.load(last_path, map_location=device, weights_only=False)
@@ -549,11 +588,13 @@ def train_one_model(
         )
 
         should_stop = False
+        # 클래스 불균형에 덜 치우치는 검증 Macro-F1을 최종 모델 선정 기준으로 삼는다.
         if val_metrics.macro_f1 > best_f1:
             best_f1 = val_metrics.macro_f1
             best_epoch = epoch
             best_validation = asdict(val_metrics)
             stale_epochs = 0
+            # best.pt는 추론·웹캠 프로그램에 전달할 최적 가중치와 전처리 정보를 담는다.
             atomic_torch_save(
                 best_path,
                 {
@@ -585,6 +626,7 @@ def train_one_model(
         elapsed_seconds = previous_elapsed_seconds + (time.time() - started)
         atomic_write_json(history_path, history)
         atomic_write_json(report_history_path, history)
+        # last.pt는 최고 모델과 별개로 재개에 필요한 현재 학습 상태 전체를 보관한다.
         atomic_torch_save(
             last_path,
             {
@@ -614,6 +656,7 @@ def train_one_model(
         raise RuntimeError(f"{model_name}에서 유효한 최고 성능을 저장하지 못했습니다.")
 
     elapsed_seconds = previous_elapsed_seconds + (time.time() - started)
+    # 그래프와 팀원 PC 결과 비교에 필요한 값을 작은 JSON으로 따로 남긴다.
     summary = {
         "run_name": args.run_name,
         "model": model_name,
@@ -654,6 +697,7 @@ def train_one_model(
 
 
 def main() -> None:
+    """데이터 구성 후 요청 모델을 차례로 학습하고 순위표와 그래프를 생성한다."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -694,6 +738,7 @@ def main() -> None:
 
     train_transform, val_transform = make_transforms()
     persistent_workers = args.workers > 0
+    # CUDA가 인식되면 자동으로 GPU를 선택하며 DataLoader도 pinned memory를 사용한다.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     LOGGER.info("사용 장치: %s", device)
     environment = runtime_info(device)
@@ -718,6 +763,7 @@ def main() -> None:
         persistent_workers=persistent_workers,
     )
 
+    # 같은 데이터와 하이퍼파라미터를 사용해 모델별 비교 조건을 맞춘다.
     comparison = [
         train_one_model(
             model_name,
