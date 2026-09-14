@@ -1,2 +1,0 @@
-﻿rank,run_name,model,best_epoch,best_accuracy,best_macro_f1,gpu_name,history_path
-1,models,resnet18,1,0.6480294715837139,0.6236030301951064,unknown,D:\emotion_project\models\resnet18\history.json

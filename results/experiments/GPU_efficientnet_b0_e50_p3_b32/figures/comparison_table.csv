@@ -1,2 +1,0 @@
-﻿rank,run_name,model,best_epoch,best_accuracy,best_macro_f1,gpu_name,history_path
-1,GPU_efficientnet_b0_e50_p3_b32,efficientnet_b0,15,0.7399554856287655,0.7357474713298793,NVIDIA GeForce RTX 4060,D:\emotion_project\results\experiments\GPU_efficientnet_b0_e50_p3_b32\efficientnet_b0\history.json
