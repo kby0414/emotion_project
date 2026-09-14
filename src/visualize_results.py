@@ -84,6 +84,14 @@ def save_figure(fig: plt.Figure, path: Path) -> Path:
     return path
 
 
+def comparison_labels(experiments: list[dict[str, Any]]) -> list[str]:
+    """모델이 서로 다르면 발표 그래프에는 간결한 모델명만 표시한다."""
+    model_names = [experiment["model"] for experiment in experiments]
+    if len(set(model_names)) == len(model_names):
+        return model_names
+    return [experiment["label"] for experiment in experiments]
+
+
 def plot_training_curves(experiment: dict[str, Any], output_dir: Path) -> Path:
     history = experiment["history"]
     epochs = [row["epoch"] for row in history]
@@ -150,7 +158,7 @@ def plot_confusion_matrix(experiment: dict[str, Any], output_dir: Path) -> Path 
 
 
 def plot_model_comparison(experiments: list[dict[str, Any]], output_dir: Path) -> Path:
-    labels = [experiment["label"] for experiment in experiments]
+    labels = comparison_labels(experiments)
     accuracy = [experiment["best"]["validation"]["accuracy"] for experiment in experiments]
     macro_f1 = [experiment["best"]["validation"]["macro_f1"] for experiment in experiments]
     positions = np.arange(len(experiments))
@@ -172,6 +180,7 @@ def plot_model_comparison(experiments: list[dict[str, Any]], output_dir: Path) -
 def plot_per_class_f1(experiments: list[dict[str, Any]], output_dir: Path) -> Path:
     positions = np.arange(len(CLASS_NAMES))
     width = 0.8 / len(experiments)
+    labels = comparison_labels(experiments)
     fig, axis = plt.subplots(figsize=(13, 6.5))
     for index, experiment in enumerate(experiments):
         values = [
@@ -179,7 +188,7 @@ def plot_per_class_f1(experiments: list[dict[str, Any]], output_dir: Path) -> Pa
             for name in CLASS_NAMES
         ]
         offset = (index - (len(experiments) - 1) / 2) * width
-        axis.bar(positions + offset, values, width, label=experiment["label"])
+        axis.bar(positions + offset, values, width, label=labels[index])
     axis.set(title="클래스별 검증 F1 비교", xlabel="감정 클래스", ylabel="F1", ylim=(0, 1))
     axis.set_xticks(positions, CLASS_NAMES)
     axis.grid(axis="y", alpha=0.25)
@@ -199,9 +208,12 @@ def write_comparison_files(experiments: list[dict[str, Any]], output_dir: Path) 
         "rank",
         "run_name",
         "model",
+        "completed_epochs",
         "best_epoch",
         "best_accuracy",
         "best_macro_f1",
+        "parameters",
+        "elapsed_minutes",
         "gpu_name",
         "history_path",
     )
@@ -215,9 +227,12 @@ def write_comparison_files(experiments: list[dict[str, Any]], output_dir: Path) 
                     "rank": rank,
                     "run_name": experiment["run_name"],
                     "model": experiment["model"],
+                    "completed_epochs": summary.get("completed_epochs", ""),
                     "best_epoch": experiment["best"]["epoch"],
                     "best_accuracy": experiment["best"]["validation"]["accuracy"],
                     "best_macro_f1": experiment["best"]["validation"]["macro_f1"],
+                    "parameters": summary.get("parameters", ""),
+                    "elapsed_minutes": summary.get("elapsed_minutes", ""),
                     "gpu_name": summary.get("environment", {}).get("gpu_name", "unknown"),
                     "history_path": str(experiment["history_path"]),
                 }
@@ -227,14 +242,20 @@ def write_comparison_files(experiments: list[dict[str, Any]], output_dir: Path) 
     lines = [
         "# 모델 비교 요약",
         "",
-        "| 순위 | 실험/모델 | Best epoch | Accuracy | Macro-F1 |",
-        "|---:|---|---:|---:|---:|",
+        "| 순위 | 모델 | 완료/Best epoch | Accuracy | Macro-F1 | Params(M) | 학습 시간(분) |",
+        "|---:|---|---:|---:|---:|---:|---:|",
     ]
     for rank, experiment in enumerate(ranked, start=1):
         best = experiment["best"]
+        summary = experiment["summary"]
+        parameters_m = float(summary.get("parameters", 0)) / 1_000_000
+        elapsed_minutes = float(summary.get("elapsed_minutes", 0))
         lines.append(
-            f"| {rank} | {experiment['label']} | {best['epoch']} | "
-            f"{best['validation']['accuracy']:.4f} | {best['validation']['macro_f1']:.4f} |"
+            f"| {rank} | {experiment['model']} | "
+            f"{summary.get('completed_epochs', '-')}/{best['epoch']} | "
+            f"{best['validation']['accuracy']:.4f} | "
+            f"{best['validation']['macro_f1']:.4f} | "
+            f"{parameters_m:.2f} | {elapsed_minutes:.1f} |"
         )
     lines.extend(
         [
